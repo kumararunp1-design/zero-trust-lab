@@ -45,6 +45,8 @@ services:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin123
       KC_HEALTH_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_PROXY_HEADERS: xforwarded
       JAVA_OPTS_APPEND: "-Xms128m -Xmx512m -XX:MaxMetaspaceSize=128m"
     ports:
       - "8080:8080"
