@@ -97,6 +97,49 @@ wait_for_service "Vulnerable App" "http://localhost:8888" 60 || true
 wait_for_service "SIEM Dashboard" "http://localhost:5601/api/health" 60 || true
 
 # ---------------------------------------------------------------------------
+# Configure Keycloak redirect URIs for Codespaces
+# ---------------------------------------------------------------------------
+CODESPACE_NAME="${CODESPACE_NAME:-}"
+GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}"
+
+if [[ -n "$CODESPACE_NAME" ]]; then
+    log "Configuring Keycloak redirect URIs for Codespaces..."
+    SUFFIX="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
+    CS_FRONTEND="https://${CODESPACE_NAME}-3000.${SUFFIX}"
+
+    # Get admin token
+    KC_TOKEN=$(curl -sf -X POST "http://localhost:8080/realms/master/protocol/openid-connect/token" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "client_id=admin-cli" \
+        -d "username=admin" \
+        -d "password=admin123" \
+        -d "grant_type=password" | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])" 2>/dev/null) || true
+
+    if [[ -n "$KC_TOKEN" ]]; then
+        # Find the zt-frontend client ID (UUID)
+        CLIENT_UUID=$(curl -sf -H "Authorization: Bearer $KC_TOKEN" \
+            "http://localhost:8080/admin/realms/zero-trust-lab/clients?clientId=zt-frontend" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['id'])" 2>/dev/null) || true
+
+        if [[ -n "$CLIENT_UUID" ]]; then
+            # Update redirect URIs with exact Codespaces URLs
+            curl -sf -X PUT \
+                -H "Authorization: Bearer $KC_TOKEN" \
+                -H "Content-Type: application/json" \
+                "http://localhost:8080/admin/realms/zero-trust-lab/clients/$CLIENT_UUID" \
+                -d "{
+                    \"redirectUris\": [\"http://localhost:3000/*\", \"${CS_FRONTEND}/*\"],
+                    \"webOrigins\": [\"http://localhost:3000\", \"${CS_FRONTEND}\"],
+                    \"attributes\": {
+                        \"post.logout.redirect.uris\": \"http://localhost:3000/*##${CS_FRONTEND}/*\"
+                    }
+                }" > /dev/null 2>&1 && log "Keycloak redirect URIs updated for ${CS_FRONTEND}" \
+                || warn "Could not update Keycloak redirect URIs (non-critical)"
+        fi
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # Print access information
 # ---------------------------------------------------------------------------
 echo ""
@@ -105,11 +148,7 @@ echo -e "${BOLD}  Lab Environment Ready!${NC}"
 echo -e "${BOLD}============================================================${NC}"
 echo ""
 
-CODESPACE_NAME="${CODESPACE_NAME:-}"
-GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}"
-
 if [[ -n "$CODESPACE_NAME" ]]; then
-    SUFFIX="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
     echo -e "  ${BOLD}Service URLs (click to open in browser):${NC}"
     echo -e "  ${CYAN}Frontend:${NC}       https://${CODESPACE_NAME}-3000.${SUFFIX}"
     echo -e "  ${CYAN}Backend API:${NC}    https://${CODESPACE_NAME}-5000.${SUFFIX}"
