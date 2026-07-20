@@ -1,0 +1,187 @@
+# =============================================================================
+# Zero Trust Lab Environment - Docker Compose
+# =============================================================================
+# Optimized for GitHub Codespaces (4-8 GB RAM).
+# Uses lightweight SIEM (siem-lite) instead of Wazuh (~50 MB vs ~3 GB).
+#
+# Network Segments:
+#   zt-frontend   (172.20.1.0/24) - User-facing services
+#   zt-backend    (172.20.2.0/24) - Internal APIs and policy engines
+#   zt-monitoring (172.20.3.0/24) - SIEM and observability
+#   zt-dmz        (172.20.4.0/24) - Intentionally vulnerable targets
+# =============================================================================
+
+networks:
+  zt-frontend:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.1.0/24
+  zt-backend:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.2.0/24
+  zt-monitoring:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.3.0/24
+  zt-dmz:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.4.0/24
+
+services:
+  # ---------------------------------------------------------------------------
+  # Identity Provider - Keycloak
+  # ---------------------------------------------------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: zt-keycloak
+    command: start-dev --import-realm
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin123
+      KC_HEALTH_ENABLED: "true"
+      JAVA_OPTS_APPEND: "-Xms128m -Xmx512m -XX:MaxMetaspaceSize=128m"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    networks:
+      zt-frontend:
+        ipv4_address: 172.20.1.10
+      zt-backend:
+        ipv4_address: 172.20.2.10
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+        reservations:
+          memory: 384M
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080; echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; cat <&3 | grep -q '200'"]
+      interval: 15s
+      timeout: 10s
+      retries: 15
+      start_period: 60s
+
+  # ---------------------------------------------------------------------------
+  # Policy Engine - Open Policy Agent
+  # ---------------------------------------------------------------------------
+  opa:
+    image: openpolicyagent/opa:0.64.0
+    container_name: zt-opa
+    command:
+      - run
+      - --server
+      - --addr=0.0.0.0:8181
+      - --log-level=info
+      - /policies
+    ports:
+      - "8181:8181"
+    volumes:
+      - ./opa/policies:/policies:ro
+    networks:
+      zt-backend:
+        ipv4_address: 172.20.2.20
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+  # ---------------------------------------------------------------------------
+  # Backend API - Zero Trust Enforced
+  # ---------------------------------------------------------------------------
+  backend-api:
+    build:
+      context: ./apps/backend
+      dockerfile: Dockerfile
+    container_name: zt-backend-api
+    environment:
+      KEYCLOAK_URL: http://172.20.2.10:8080
+      OPA_URL: http://172.20.2.20:8181
+      KEYCLOAK_REALM: zero-trust-lab
+      FLASK_ENV: development
+    ports:
+      - "5000:5000"
+    networks:
+      zt-backend:
+        ipv4_address: 172.20.2.30
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    depends_on:
+      keycloak:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # Frontend Application
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+    container_name: zt-frontend-app
+    environment:
+      BACKEND_URL: http://172.20.2.30:5000
+      KEYCLOAK_URL: http://localhost:8080
+    ports:
+      - "3000:3000"
+    networks:
+      zt-frontend:
+        ipv4_address: 172.20.1.20
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    depends_on:
+      - backend-api
+
+  # ---------------------------------------------------------------------------
+  # Vulnerable Application - Attack Target in DMZ
+  # ---------------------------------------------------------------------------
+  vulnerable-app:
+    build:
+      context: ./apps/vulnerable
+      dockerfile: Dockerfile
+    container_name: zt-vulnerable-app
+    ports:
+      - "8888:8888"
+    networks:
+      zt-dmz:
+        ipv4_address: 172.20.4.10
+      zt-monitoring:
+        ipv4_address: 172.20.3.40
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # ---------------------------------------------------------------------------
+  # Lightweight SIEM Dashboard (replaces Wazuh stack)
+  # ---------------------------------------------------------------------------
+  siem-lite:
+    build:
+      context: ./apps/siem-lite
+      dockerfile: Dockerfile
+    container_name: zt-siem-lite
+    ports:
+      - "5601:5601"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      zt-monitoring:
+        ipv4_address: 172.20.3.10
+      zt-backend:
+        ipv4_address: 172.20.2.40
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    depends_on:
+      - backend-api
+      - vulnerable-app

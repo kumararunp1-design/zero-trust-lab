@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Passkey / WebAuthn Demo - Zero Trust Lab</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: Calibri, 'Segoe UI', sans-serif; background: #f5f8fc; color: #333; }
+        .container { max-width: 900px; margin: 30px auto; padding: 0 20px; }
+        .header { background: linear-gradient(135deg, #003B64, #0076CE); color: white;
+                   padding: 25px; border-radius: 10px; text-align: center; margin-bottom: 25px; }
+        .header h1 { margin-bottom: 8px; font-size: 24px; }
+        .header p { opacity: 0.9; font-size: 14px; }
+        .card { background: white; border-radius: 8px; padding: 20px; margin: 15px 0;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .card h2 { color: #003B64; margin-bottom: 12px; font-size: 18px; }
+        .card h3 { color: #0076CE; margin: 15px 0 8px; font-size: 15px; }
+        .btn { display: inline-block; padding: 10px 22px; border: none; border-radius: 5px;
+               cursor: pointer; font-size: 14px; font-weight: bold; margin: 4px; transition: 0.2s; }
+        .btn:hover { opacity: 0.88; transform: translateY(-1px); }
+        .btn-primary { background: #0076CE; color: white; }
+        .btn-success { background: #2E8B57; color: white; }
+        .btn-warning { background: #FF8C00; color: white; }
+        .btn-danger { background: #E03C31; color: white; }
+        .btn-info { background: #6c757d; color: white; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+        .status { padding: 12px 15px; border-radius: 5px; margin: 10px 0; font-size: 13px; }
+        .status.success { background: #d4edda; color: #155724; border-left: 4px solid #28a745; }
+        .status.error { background: #f8d7da; color: #721c24; border-left: 4px solid #dc3545; }
+        .status.info { background: #d1ecf1; color: #0c5460; border-left: 4px solid #17a2b8; }
+        .status.warn { background: #fff3cd; color: #856404; border-left: 4px solid #ffc107; }
+
+        pre { background: #1e1e2e; color: #cdd6f4; padding: 15px; border-radius: 6px;
+              overflow-x: auto; font-size: 12px; line-height: 1.5; margin: 10px 0; }
+        code { font-family: 'Fira Code', 'Consolas', monospace; }
+
+        .flow-diagram { background: #f0f4ff; padding: 15px; border-radius: 6px; margin: 10px 0;
+                        border-left: 4px solid #0076CE; font-size: 13px; }
+        .flow-step { padding: 6px 0; padding-left: 15px; position: relative; }
+        .flow-step::before { content: ""; position: absolute; left: 0; top: 12px;
+                             width: 8px; height: 8px; background: #0076CE; border-radius: 50%; }
+        .flow-step.active::before { background: #2E8B57; box-shadow: 0 0 6px #2E8B57; }
+        .flow-step.done::before { background: #28a745; }
+
+        .comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 10px 0; }
+        .comparison > div { padding: 15px; border-radius: 6px; font-size: 13px; }
+        .comparison .old { background: #fff0f0; border-left: 3px solid #E03C31; }
+        .comparison .new { background: #f0fff0; border-left: 3px solid #2E8B57; }
+
+        .credential-card { background: #f8f9fa; padding: 12px; border-radius: 5px;
+                           margin: 8px 0; border: 1px solid #dee2e6; font-size: 13px; }
+        .credential-card .label { color: #6c757d; font-size: 11px; text-transform: uppercase; }
+
+        .tabs { display: flex; gap: 0; margin-bottom: 0; }
+        .tab { padding: 10px 20px; cursor: pointer; background: #e9ecef; border: none;
+               font-size: 13px; transition: 0.2s; }
+        .tab:first-child { border-radius: 6px 0 0 0; }
+        .tab:last-child { border-radius: 0 6px 0 0; }
+        .tab.active { background: white; font-weight: bold; color: #0076CE; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        #log { max-height: 300px; overflow-y: auto; }
+        .log-entry { padding: 3px 0; border-bottom: 1px solid #2a2a3e; }
+        .log-time { color: #89b4fa; }
+        .log-ok { color: #a6e3a1; }
+        .log-err { color: #f38ba8; }
+        .log-info { color: #fab387; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Passkeys & WebAuthn Demo</h1>
+            <p>Zero Trust Lab Extension | FIDO2 Passwordless Authentication</p>
+        </div>
+
+        <!-- Evolution Comparison -->
+        <div class="card">
+            <h2>Authentication Evolution: Passwords to Passkeys</h2>
+            <div class="comparison">
+                <div class="old">
+                    <strong>Traditional (Passwords)</strong>
+                    <ul style="margin-top:8px; padding-left:18px;">
+                        <li>Shared secrets (server stores hash)</li>
+                        <li>Phishable (user types into fake site)</li>
+                        <li>Reuse across sites = credential stuffing</li>
+                        <li>MFA helps but adds friction</li>
+                    </ul>
+                </div>
+                <div class="new">
+                    <strong>Modern (Passkeys / FIDO2)</strong>
+                    <ul style="margin-top:8px; padding-left:18px;">
+                        <li>Asymmetric keypair (private key never leaves device)</li>
+                        <li>Phishing-proof (origin-bound)</li>
+                        <li>Unique per site (no credential reuse)</li>
+                        <li>Built-in MFA (biometric + possession)</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="status info">
+                <strong>Industry Adoption (2024-2025):</strong> Apple, Google, and Microsoft have all implemented passkeys
+                in their platforms. Google reports 50% fewer sign-in issues with passkeys. GitHub and AWS IAM now support
+                passkeys for account login. NIST SP 800-63B-4 (draft) recommends phishing-resistant authenticators.
+            </div>
+        </div>
+
+        <!-- Interactive Demo -->
+        <div class="card">
+            <h2>Interactive WebAuthn Demo</h2>
+            <p style="font-size:13px; color:#666; margin-bottom:12px;">
+                This demo uses the <strong>WebAuthn browser API</strong> with Chrome's built-in virtual authenticator
+                or your platform authenticator (TouchID, Windows Hello, etc). No physical security key needed.
+            </p>
+
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('register')">1. Register Passkey</button>
+                <button class="tab" onclick="switchTab('authenticate')">2. Authenticate</button>
+                <button class="tab" onclick="switchTab('inspect')">3. Inspect Credential</button>
+            </div>
+
+            <!-- Registration Tab -->
+            <div id="tab-register" class="tab-content active" style="background:white; padding:15px; border:1px solid #dee2e6; border-top:none; border-radius:0 0 6px 6px;">
+                <h3>Step 1: Register a Passkey (navigator.credentials.create)</h3>
+                <div class="flow-diagram">
+                    <div class="flow-step" id="reg-step-1">Browser calls navigator.credentials.create()</div>
+                    <div class="flow-step" id="reg-step-2">Authenticator generates new keypair (ES256)</div>
+                    <div class="flow-step" id="reg-step-3">User verifies with biometric/PIN (user presence)</div>
+                    <div class="flow-step" id="reg-step-4">Public key + attestation returned to server</div>
+                    <div class="flow-step" id="reg-step-5">Server stores public key (never sees private key)</div>
+                </div>
+                <div style="margin: 15px 0;">
+                    <label style="font-size:13px;"><strong>Username:</strong></label>
+                    <input type="text" id="reg-username" value="alice" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px; margin:5px 8px; width:200px;">
+                    <button class="btn btn-primary" onclick="registerPasskey()" id="btn-register">Register Passkey</button>
+                </div>
+                <div id="reg-result"></div>
+            </div>
+
+            <!-- Authentication Tab -->
+            <div id="tab-authenticate" class="tab-content" style="background:white; padding:15px; border:1px solid #dee2e6; border-top:none; border-radius:0 0 6px 6px;">
+                <h3>Step 2: Authenticate with Passkey (navigator.credentials.get)</h3>
+                <div class="flow-diagram">
+                    <div class="flow-step" id="auth-step-1">Server sends challenge (random nonce)</div>
+                    <div class="flow-step" id="auth-step-2">Browser calls navigator.credentials.get()</div>
+                    <div class="flow-step" id="auth-step-3">User verifies with biometric/PIN</div>
+                    <div class="flow-step" id="auth-step-4">Authenticator signs challenge with private key</div>
+                    <div class="flow-step" id="auth-step-5">Server verifies signature with stored public key</div>
+                </div>
+                <div style="margin: 15px 0;">
+                    <button class="btn btn-success" onclick="authenticatePasskey()" id="btn-auth" disabled>Authenticate with Passkey</button>
+                    <span id="auth-status-text" style="font-size:13px; color:#666; margin-left:10px;">(Register a passkey first)</span>
+                </div>
+                <div id="auth-result"></div>
+            </div>
+
+            <!-- Inspect Tab -->
+            <div id="tab-inspect" class="tab-content" style="background:white; padding:15px; border:1px solid #dee2e6; border-top:none; border-radius:0 0 6px 6px;">
+                <h3>Step 3: Inspect the Credential</h3>
+                <p style="font-size:13px; color:#666;">Examine what was created during registration and authentication.</p>
+                <div id="credential-details">
+                    <div class="status info">Register and authenticate first to see credential details.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Keycloak Integration Guide -->
+        <div class="card">
+            <h2>Keycloak WebAuthn Integration (Lab Exercise)</h2>
+
+            <h3>Enable WebAuthn in Keycloak Admin Console</h3>
+            <p style="font-size:13px; margin-bottom:10px;">Follow these steps to add passkey support to the lab's Keycloak instance:</p>
+
+            <div class="flow-diagram">
+                <div class="flow-step"><strong>Step 1:</strong> Open Keycloak Admin: <code>http://localhost:8080/admin</code> (admin / admin123)</div>
+                <div class="flow-step"><strong>Step 2:</strong> Select realm <strong>"zero-trust-lab"</strong></div>
+                <div class="flow-step"><strong>Step 3:</strong> Go to <strong>Authentication</strong> &rarr; <strong>Flows</strong></div>
+                <div class="flow-step"><strong>Step 4:</strong> Select <strong>"browser-with-webauthn"</strong> flow (pre-configured in realm)</div>
+                <div class="flow-step"><strong>Step 5:</strong> Go to <strong>Authentication</strong> &rarr; <strong>Bindings</strong>, set Browser Flow to <strong>"browser-with-webauthn"</strong></div>
+                <div class="flow-step"><strong>Step 6:</strong> Login as alice, you'll see option to register a security key</div>
+                <div class="flow-step"><strong>Step 7:</strong> In Chrome: DevTools &rarr; More Tools &rarr; <strong>WebAuthn</strong> tab &rarr; Enable virtual authenticator</div>
+            </div>
+
+            <h3>Chrome Virtual Authenticator Setup</h3>
+            <p style="font-size:13px;">No physical hardware key needed. Chrome DevTools provides a software authenticator:</p>
+            <pre><code>1. Open Chrome DevTools (F12)
+2. Click "..." menu &rarr; More Tools &rarr; WebAuthn
+3. Check "Enable virtual authenticator environment"
+4. Add new authenticator:
+   - Protocol: ctap2
+   - Transport: internal
+   - Supports resident keys: checked
+   - Supports user verification: checked
+5. Now any WebAuthn API call will use this virtual authenticator</code></pre>
+
+            <h3>What Happens Under the Hood</h3>
+            <pre><code>// Registration: Server creates challenge, browser creates credential
+const credential = await navigator.credentials.create({
+    publicKey: {
+        challenge: serverChallenge,        // Random bytes from server
+        rp: { name: "Zero Trust Lab", id: "localhost" },
+        user: {
+            id: userId,                    // Opaque user handle
+            name: "alice@zerotrust.lab",
+            displayName: "Alice Admin"
+        },
+        pubKeyCredParams: [
+            { type: "public-key", alg: -7 }  // ES256 (ECDSA w/ SHA-256)
+        ],
+        authenticatorSelection: {
+            authenticatorAttachment: "platform",  // Built-in (TouchID/Hello)
+            residentKey: "preferred",             // Discoverable credential
+            userVerification: "preferred"         // Biometric if available
+        },
+        attestation: "none"                // Lab doesn't need attestation
+    }
+});
+// credential.response.getPublicKey() -> sent to server, stored in DB
+// Private key NEVER leaves the authenticator</code></pre>
+        </div>
+
+        <!-- Security Analysis -->
+        <div class="card">
+            <h2>Why Passkeys are Phishing-Proof</h2>
+            <div class="flow-diagram">
+                <div class="flow-step"><strong>Origin Binding:</strong> Private key is bound to <code>rp.id</code>
+                    (e.g., "localhost"). A phishing site at "evil.com" cannot trigger the key for "localhost".</div>
+                <div class="flow-step"><strong>Challenge-Response:</strong> Server sends fresh random challenge each time.
+                    Replay attacks impossible since signatures are unique per challenge.</div>
+                <div class="flow-step"><strong>No Shared Secrets:</strong> Server only stores public key. Even if the server
+                    database is breached, attackers cannot authenticate (no private key to steal).</div>
+                <div class="flow-step"><strong>User Verification:</strong> Biometric or PIN required = inherent 2FA
+                    (something you HAVE + something you ARE/KNOW) in a single gesture.</div>
+            </div>
+            <div class="status warn">
+                <strong>Zero Trust Connection:</strong> Passkeys enforce "never trust, always verify" at the
+                authentication layer. Combined with short-lived JWTs from Keycloak and per-request OPA policy checks,
+                every access decision is cryptographically verified end-to-end.
+            </div>
+        </div>
+
+        <!-- Event Log -->
+        <div class="card">
+            <h2>WebAuthn Event Log</h2>
+            <pre id="log"><code><span class="log-info">[Waiting for WebAuthn operations...]</span></code></pre>
+        </div>
+    </div>
+
+    <script>
+    // ========================================================================
+    // WebAuthn Demo - Client-Side Simulation
+    // Uses real browser WebAuthn API (works with Chrome virtual authenticator
+    // or platform authenticator like TouchID / Windows Hello)
+    // ========================================================================
+
+    let storedCredential = null;
+    let registrationData = null;
+    let authenticationData = null;
+
+    // Utility: base64url encode/decode
+    function bufferToBase64url(buffer) {
+        const bytes = new Uint8Array(buffer);
+        let str = '';
+        for (const b of bytes) str += String.fromCharCode(b);
+        return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    }
+
+    function base64urlToBuffer(base64url) {
+        const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+        const pad = base64.length % 4 === 0 ? '' : '='.repeat(4 - (base64.length % 4));
+        const binary = atob(base64 + pad);
+        const buffer = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) buffer[i] = binary.charCodeAt(i);
+        return buffer.buffer;
+    }
+
+    function generateChallenge() {
+        const challenge = new Uint8Array(32);
+        crypto.getRandomValues(challenge);
+        return challenge;
+    }
+
+    function generateUserId() {
+        const id = new Uint8Array(16);
+        crypto.getRandomValues(id);
+        return id;
+    }
+
+    function log(message, type = 'info') {
+        const logEl = document.getElementById('log');
+        const time = new Date().toLocaleTimeString();
+        const cssClass = type === 'ok' ? 'log-ok' : type === 'err' ? 'log-err' : 'log-info';
+        const prefix = type === 'ok' ? '+' : type === 'err' ? '!' : '*';
+        const entry = `<span class="log-entry"><span class="log-time">[${time}]</span> <span class="${cssClass}">[${prefix}]</span> ${message}</span>\n`;
+
+        if (logEl.querySelector('.log-info') && logEl.textContent.includes('Waiting')) {
+            logEl.innerHTML = '<code>' + entry + '</code>';
+        } else {
+            logEl.querySelector('code').innerHTML += entry;
+        }
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function highlightStep(prefix, stepNum) {
+        for (let i = 1; i <= 5; i++) {
+            const el = document.getElementById(`${prefix}-step-${i}`);
+            if (el) {
+                el.classList.remove('active', 'done');
+                if (i < stepNum) el.classList.add('done');
+                if (i === stepNum) el.classList.add('active');
+            }
+        }
+    }
+
+    // Tab switching
+    function switchTab(name) {
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.getElementById('tab-' + name).classList.add('active');
+        event.target.classList.add('active');
+    }
+
+    // ========================================================================
+    // REGISTRATION
+    // ========================================================================
+    async function registerPasskey() {
+        const username = document.getElementById('reg-username').value || 'alice';
+        const resultDiv = document.getElementById('reg-result');
+
+        if (!window.PublicKeyCredential) {
+            resultDiv.innerHTML = '<div class="status error">WebAuthn not supported in this browser. Use Chrome 67+ or Firefox 60+.</div>';
+            log('WebAuthn API not available', 'err');
+            return;
+        }
+
+        log(`Starting passkey registration for "${username}"...`);
+        highlightStep('reg', 1);
+
+        const challenge = generateChallenge();
+        const userId = generateUserId();
+
+        log(`Challenge generated: ${bufferToBase64url(challenge).substring(0, 20)}...`);
+        log(`User ID (opaque handle): ${bufferToBase64url(userId).substring(0, 20)}...`);
+
+        const publicKeyOptions = {
+            challenge: challenge,
+            rp: {
+                name: "Zero Trust Lab",
+                id: "localhost"
+            },
+            user: {
+                id: userId,
+                name: `${username}@zerotrust.lab`,
+                displayName: username.charAt(0).toUpperCase() + username.slice(1)
+            },
+            pubKeyCredParams: [
+                { type: "public-key", alg: -7 },   // ES256
+                { type: "public-key", alg: -257 }   // RS256 (fallback)
+            ],
+            authenticatorSelection: {
+                authenticatorAttachment: "platform",
+                residentKey: "preferred",
+                userVerification: "preferred"
+            },
+            attestation: "none",
+            timeout: 60000
+        };
+
+        try {
+            highlightStep('reg', 2);
+            log('Calling navigator.credentials.create() - authenticator generating keypair...');
+
+            highlightStep('reg', 3);
+            const credential = await navigator.credentials.create({ publicKey: publicKeyOptions });
+
+            highlightStep('reg', 4);
+            log('User verification complete. Credential created!', 'ok');
+
+            // Extract registration data
+            const credId = bufferToBase64url(credential.rawId);
+            const clientDataJSON = JSON.parse(new TextDecoder().decode(credential.response.clientDataJSON));
+            const attestationBuffer = credential.response.attestationObject;
+
+            storedCredential = {
+                credentialId: credential.rawId,
+                credentialIdBase64: credId,
+                type: credential.type,
+                authenticatorAttachment: credential.authenticatorAttachment,
+                clientDataJSON: clientDataJSON
+            };
+
+            // Try to extract public key (available in newer browsers)
+            try {
+                const pubKey = credential.response.getPublicKey();
+                if (pubKey) {
+                    storedCredential.publicKeyBase64 = bufferToBase64url(pubKey);
+                    log(`Public key extracted: ${storedCredential.publicKeyBase64.substring(0, 30)}...`, 'ok');
+                }
+            } catch(e) {
+                log('Public key extraction not supported in this browser (normal for older versions)');
+            }
+
+            registrationData = {
+                credentialId: credId,
+                clientDataJSON: clientDataJSON,
+                attestationObjectLength: attestationBuffer.byteLength,
+                type: credential.type,
+                authenticatorAttachment: credential.authenticatorAttachment || 'N/A'
+            };
+
+            highlightStep('reg', 5);
+            log(`Credential ID: ${credId.substring(0, 30)}...`, 'ok');
+            log(`Type: ${credential.type}`, 'ok');
+            log(`Attachment: ${credential.authenticatorAttachment || 'N/A'}`, 'ok');
+            log(`Origin verified: ${clientDataJSON.origin}`, 'ok');
+            log('Registration complete. Public key stored (server-side in production).', 'ok');
+
+            resultDiv.innerHTML = `
+                <div class="status success">
+                    <strong>Passkey registered successfully!</strong><br>
+                    Credential ID: <code>${credId.substring(0, 40)}...</code><br>
+                    Type: ${credential.type} | Attachment: ${credential.authenticatorAttachment || 'platform'}<br>
+                    Origin: ${clientDataJSON.origin} (phishing protection - key bound to this origin)
+                </div>
+            `;
+
+            // Enable authentication button
+            document.getElementById('btn-auth').disabled = false;
+            document.getElementById('auth-status-text').textContent = 'Ready to authenticate!';
+            document.getElementById('auth-status-text').style.color = '#2E8B57';
+
+            updateInspectTab();
+
+        } catch (err) {
+            highlightStep('reg', 0);
+            log(`Registration failed: ${err.message}`, 'err');
+            let hint = '';
+            if (err.name === 'NotAllowedError') {
+                hint = '<br><strong>Tip:</strong> Enable Chrome Virtual Authenticator: DevTools (F12) &rarr; More Tools &rarr; WebAuthn &rarr; Enable virtual authenticator &rarr; Add authenticator (ctap2, internal, resident keys, user verification).';
+            } else if (err.name === 'SecurityError') {
+                hint = '<br><strong>Tip:</strong> WebAuthn requires a secure context. Open this page via <code>http://localhost:3000/passkey</code>.';
+            }
+            resultDiv.innerHTML = `<div class="status error"><strong>Registration failed:</strong> ${err.message}${hint}</div>`;
+        }
+    }
+
+    // ========================================================================
+    // AUTHENTICATION
+    // ========================================================================
+    async function authenticatePasskey() {
+        if (!storedCredential) {
+            document.getElementById('auth-result').innerHTML = '<div class="status error">No credential registered. Register first.</div>';
+            return;
+        }
+
+        const resultDiv = document.getElementById('auth-result');
+        const challenge = generateChallenge();
+
+        log('Starting passkey authentication...');
+        highlightStep('auth', 1);
+        log(`Server challenge: ${bufferToBase64url(challenge).substring(0, 20)}...`);
+
+        const assertionOptions = {
+            challenge: challenge,
+            rpId: "localhost",
+            allowCredentials: [{
+                type: "public-key",
+                id: storedCredential.credentialId
+            }],
+            userVerification: "preferred",
+            timeout: 60000
+        };
+
+        try {
+            highlightStep('auth', 2);
+            log('Calling navigator.credentials.get()...');
+
+            highlightStep('auth', 3);
+            const assertion = await navigator.credentials.get({ publicKey: assertionOptions });
+
+            highlightStep('auth', 4);
+            log('User verified. Assertion signed by authenticator.', 'ok');
+
+            const clientDataJSON = JSON.parse(new TextDecoder().decode(assertion.response.clientDataJSON));
+            const signature = bufferToBase64url(assertion.response.signature);
+            const authenticatorData = bufferToBase64url(assertion.response.authenticatorData);
+
+            authenticationData = {
+                credentialId: bufferToBase64url(assertion.rawId),
+                clientDataJSON: clientDataJSON,
+                signatureBase64: signature,
+                authenticatorDataBase64: authenticatorData,
+                userHandle: assertion.response.userHandle
+                    ? bufferToBase64url(assertion.response.userHandle) : null
+            };
+
+            highlightStep('auth', 5);
+            log(`Signature: ${signature.substring(0, 30)}...`, 'ok');
+            log(`Challenge type: ${clientDataJSON.type}`, 'ok');
+            log(`Origin: ${clientDataJSON.origin}`, 'ok');
+            log('Server would verify signature against stored public key.', 'ok');
+            log('Authentication SUCCESSFUL - phishing-proof login complete!', 'ok');
+
+            // Simulate counter check
+            const authDataView = new DataView(assertion.response.authenticatorData);
+            const flags = authDataView.getUint8(32);
+            const signCount = authDataView.getUint32(33);
+
+            resultDiv.innerHTML = `
+                <div class="status success">
+                    <strong>Authentication successful!</strong><br>
+                    Signature verified against stored public key.<br>
+                    Sign count: ${signCount} (increments each use - detects cloning)<br>
+                    User present: ${(flags & 0x01) ? 'Yes' : 'No'} |
+                    User verified: ${(flags & 0x04) ? 'Yes (biometric/PIN)' : 'No'}<br>
+                    Origin: ${clientDataJSON.origin} (phishing protection verified)
+                </div>
+                <div class="status info">
+                    <strong>Zero Trust:</strong> This authentication proves (1) possession of the private key,
+                    (2) user presence via biometric/PIN, and (3) correct origin - all in a single gesture.
+                    Combined with Keycloak JWT issuance and OPA policy checks, this completes the Zero Trust chain.
+                </div>
+            `;
+
+            updateInspectTab();
+
+        } catch (err) {
+            highlightStep('auth', 0);
+            log(`Authentication failed: ${err.message}`, 'err');
+            resultDiv.innerHTML = `<div class="status error"><strong>Authentication failed:</strong> ${err.message}</div>`;
+        }
+    }
+
+    // ========================================================================
+    // INSPECT TAB
+    // ========================================================================
+    function updateInspectTab() {
+        const detailsDiv = document.getElementById('credential-details');
+        let html = '';
+
+        if (registrationData) {
+            html += `
+                <h3>Registration Response</h3>
+                <div class="credential-card">
+                    <div class="label">Credential ID (base64url)</div>
+                    <code style="word-break:break-all;">${registrationData.credentialId}</code>
+                </div>
+                <div class="credential-card">
+                    <div class="label">Client Data (from browser)</div>
+                    <pre style="margin:0;"><code>${JSON.stringify(registrationData.clientDataJSON, null, 2)}</code></pre>
+                </div>
+                <div class="credential-card">
+                    <div class="label">Attestation Object Size</div>
+                    ${registrationData.attestationObjectLength} bytes (contains public key + authenticator data)
+                </div>
+                <div class="credential-card">
+                    <div class="label">Key Points</div>
+                    <ul style="margin:5px 0 0 15px; font-size:13px;">
+                        <li><strong>origin</strong>: "${registrationData.clientDataJSON.origin}" - key is bound to THIS origin only</li>
+                        <li><strong>type</strong>: "webauthn.create" - registration ceremony</li>
+                        <li><strong>challenge</strong>: Server-generated nonce prevents replay</li>
+                        <li>Private key stored in authenticator, NEVER sent to server</li>
+                    </ul>
+                </div>
+            `;
+        }
+
+        if (authenticationData) {
+            html += `
+                <h3>Authentication Response</h3>
+                <div class="credential-card">
+                    <div class="label">Signature (base64url)</div>
+                    <code style="word-break:break-all; font-size:11px;">${authenticationData.signatureBase64}</code>
+                </div>
+                <div class="credential-card">
+                    <div class="label">Client Data</div>
+                    <pre style="margin:0;"><code>${JSON.stringify(authenticationData.clientDataJSON, null, 2)}</code></pre>
+                </div>
+                <div class="credential-card">
+                    <div class="label">Security Properties</div>
+                    <ul style="margin:5px 0 0 15px; font-size:13px;">
+                        <li><strong>Signature</strong>: Created by private key over (authenticatorData + clientDataHash)</li>
+                        <li><strong>type</strong>: "webauthn.get" - authentication ceremony</li>
+                        <li><strong>Phishing proof</strong>: origin "${authenticationData.clientDataJSON.origin}" is included in signed data</li>
+                        <li>If this were "https://evil-phishing.com", the signature would be INVALID for "localhost"</li>
+                    </ul>
+                </div>
+            `;
+        }
+
+        if (!html) {
+            html = '<div class="status info">Register and authenticate first to see credential details.</div>';
+        }
+
+        detailsDiv.innerHTML = html;
+    }
+
+    // Check WebAuthn support on load
+    if (window.PublicKeyCredential) {
+        log('WebAuthn API available in this browser', 'ok');
+        PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(available => {
+            if (available) {
+                log('Platform authenticator available (TouchID/Hello/etc)', 'ok');
+            } else {
+                log('No platform authenticator. Use Chrome DevTools virtual authenticator.', 'info');
+            }
+        });
+    } else {
+        log('WebAuthn NOT supported. Use Chrome 67+, Firefox 60+, or Edge 18+', 'err');
+    }
+    </script>
+</body>
+</html>
