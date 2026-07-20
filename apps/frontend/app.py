@@ -99,18 +99,24 @@ HTML_PAGE = """<!DOCTYPE html>
         const CLIENT_ID = "zt-frontend";
 
         // PKCE helpers
+        function base64urlEncode(buffer) {
+            const bytes = new Uint8Array(buffer);
+            let str = '';
+            for (const b of bytes) str += String.fromCharCode(b);
+            return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+        }
+
         function generateCodeVerifier() {
             const array = new Uint8Array(32);
             crypto.getRandomValues(array);
-            return btoa(String.fromCharCode(...array)).replace(/[+/=]/g, '');
+            return base64urlEncode(array);
         }
 
         async function generateCodeChallenge(verifier) {
             const encoder = new TextEncoder();
             const data = encoder.encode(verifier);
             const hash = await crypto.subtle.digest('SHA-256', data);
-            return btoa(String.fromCharCode(...new Uint8Array(hash)))
-                .replace(/[+]/g, '-').replace(/[/]/g, '_').replace(/=/g, '');
+            return base64urlEncode(hash);
         }
 
         async function login() {
