@@ -174,7 +174,7 @@
             <p style="font-size:13px; margin-bottom:10px;">Follow these steps to add passkey support to the lab's Keycloak instance:</p>
 
             <div class="flow-diagram">
-                <div class="flow-step"><strong>Step 1:</strong> Open Keycloak Admin: <code>http://localhost:8080/admin</code> (admin / admin123)</div>
+                <div class="flow-step"><strong>Step 1:</strong> Open Keycloak Admin: <code id="keycloak-admin-link">http://localhost:8080/admin</code> (admin / admin123)</div>
                 <div class="flow-step"><strong>Step 2:</strong> Select realm <strong>"zero-trust-lab"</strong></div>
                 <div class="flow-step"><strong>Step 3:</strong> Go to <strong>Authentication</strong> &rarr; <strong>Flows</strong></div>
                 <div class="flow-step"><strong>Step 4:</strong> Select <strong>"browser-with-webauthn"</strong> flow (pre-configured in realm)</div>
@@ -200,7 +200,7 @@
 const credential = await navigator.credentials.create({
     publicKey: {
         challenge: serverChallenge,        // Random bytes from server
-        rp: { name: "Zero Trust Lab", id: "localhost" },
+        rp: { name: "Zero Trust Lab", id: window.location.hostname },
         user: {
             id: userId,                    // Opaque user handle
             name: "alice@zerotrust.lab",
@@ -226,7 +226,7 @@ const credential = await navigator.credentials.create({
             <h2>Why Passkeys are Phishing-Proof</h2>
             <div class="flow-diagram">
                 <div class="flow-step"><strong>Origin Binding:</strong> Private key is bound to <code>rp.id</code>
-                    (e.g., "localhost"). A phishing site at "evil.com" cannot trigger the key for "localhost".</div>
+                    (the current domain). A phishing site at "evil.com" cannot trigger the key for this origin.</div>
                 <div class="flow-step"><strong>Challenge-Response:</strong> Server sends fresh random challenge each time.
                     Replay attacks impossible since signatures are unique per challenge.</div>
                 <div class="flow-step"><strong>No Shared Secrets:</strong> Server only stores public key. Even if the server
@@ -344,11 +344,12 @@ const credential = await navigator.credentials.create({
         log(`Challenge generated: ${bufferToBase64url(challenge).substring(0, 20)}...`);
         log(`User ID (opaque handle): ${bufferToBase64url(userId).substring(0, 20)}...`);
 
+        const rpId = window.location.hostname;
         const publicKeyOptions = {
             challenge: challenge,
             rp: {
                 name: "Zero Trust Lab",
-                id: "localhost"
+                id: rpId
             },
             user: {
                 id: userId,
@@ -440,7 +441,7 @@ const credential = await navigator.credentials.create({
             if (err.name === 'NotAllowedError') {
                 hint = '<br><strong>Tip:</strong> Enable Chrome Virtual Authenticator: DevTools (F12) &rarr; More Tools &rarr; WebAuthn &rarr; Enable virtual authenticator &rarr; Add authenticator (ctap2, internal, resident keys, user verification).';
             } else if (err.name === 'SecurityError') {
-                hint = '<br><strong>Tip:</strong> WebAuthn requires a secure context. Open this page via <code>http://localhost:3000/passkey</code>.';
+                hint = '<br><strong>Tip:</strong> WebAuthn requires a secure context (HTTPS or localhost).';
             }
             resultDiv.innerHTML = `<div class="status error"><strong>Registration failed:</strong> ${err.message}${hint}</div>`;
         }
@@ -464,7 +465,7 @@ const credential = await navigator.credentials.create({
 
         const assertionOptions = {
             challenge: challenge,
-            rpId: "localhost",
+            rpId: window.location.hostname,
             allowCredentials: [{
                 type: "public-key",
                 id: storedCredential.credentialId
@@ -584,7 +585,7 @@ const credential = await navigator.credentials.create({
                         <li><strong>Signature</strong>: Created by private key over (authenticatorData + clientDataHash)</li>
                         <li><strong>type</strong>: "webauthn.get" - authentication ceremony</li>
                         <li><strong>Phishing proof</strong>: origin "${authenticationData.clientDataJSON.origin}" is included in signed data</li>
-                        <li>If this were "https://evil-phishing.com", the signature would be INVALID for "localhost"</li>
+                        <li>If this were "https://evil-phishing.com", the signature would be INVALID for "${window.location.hostname}"</li>
                     </ul>
                 </div>
             `;
@@ -596,6 +597,17 @@ const credential = await navigator.credentials.create({
 
         detailsDiv.innerHTML = html;
     }
+
+    // Auto-detect Codespaces and update Keycloak admin link
+    (function() {
+        const host = window.location.hostname;
+        const match = host.match(/^(.+)-\d+\.app\.github\.dev$/);
+        if (match) {
+            const kcUrl = 'https://' + match[1] + '-8080.app.github.dev/admin';
+            const el = document.getElementById('keycloak-admin-link');
+            if (el) el.textContent = kcUrl;
+        }
+    })();
 
     // Check WebAuthn support on load
     if (window.PublicKeyCredential) {
