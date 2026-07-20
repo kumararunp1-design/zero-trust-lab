@@ -2,16 +2,21 @@
 Zero Trust Lab - Frontend Application
 
 Serves a single-page application implementing OAuth 2.0 Authorization Code
-flow with PKCE against Keycloak.
+flow against Keycloak. Token exchange happens server-side to avoid
+cross-origin issues in GitHub Codespaces.
 
 Environment Variables:
-  KEYCLOAK_URL - Public URL of the Keycloak server (default: http://localhost:8080)
-  BACKEND_URL  - Public URL of the backend API     (default: http://localhost:5000)
+  KEYCLOAK_URL          - Public URL of the Keycloak server (default: http://localhost:8080)
+  KEYCLOAK_INTERNAL_URL - Internal Docker URL for Keycloak  (default: http://172.20.1.10:8080)
+  BACKEND_URL           - Public URL of the backend API     (default: http://localhost:5000)
 """
 
 import os
+import json
 import logging
 import pathlib
+import urllib.parse
+import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 logging.basicConfig(
@@ -21,6 +26,7 @@ logging.basicConfig(
 logger = logging.getLogger("zero-trust-frontend")
 
 KEYCLOAK_URL = os.environ.get("KEYCLOAK_URL", "http://localhost:8080")
+KEYCLOAK_INTERNAL_URL = os.environ.get("KEYCLOAK_INTERNAL_URL", "http://172.20.1.10:8080")
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:5000")
 APP_DIR = pathlib.Path(__file__).resolve().parent
 
@@ -43,6 +49,7 @@ HTML_PAGE = """<!DOCTYPE html>
         .status { padding: 10px; border-radius: 4px; margin: 10px 0; }
         .status.success { background: #d4edda; color: #155724; }
         .status.error { background: #f8d7da; color: #721c24; }
+        .status.info { background: #d1ecf1; color: #0c5460; }
         pre { background: #f0f0f0; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 13px; }
         .flow-step { background: #E0F0FF; padding: 8px 12px; margin: 4px 0; border-radius: 4px; border-left: 3px solid #0076CE; }
     </style>
@@ -55,7 +62,7 @@ HTML_PAGE = """<!DOCTYPE html>
 
     <div class="card">
         <h2>Step 1: Authenticate with Keycloak (OIDC)</h2>
-        <p>Click below to authenticate via Keycloak using OAuth 2.1 Authorization Code flow with PKCE.</p>
+        <p>Click below to authenticate via Keycloak using OAuth 2.0 Authorization Code flow.</p>
         <button class="btn" onclick="login()">Login with Keycloak</button>
         <button class="btn btn-danger" onclick="logout()">Logout</button>
         <div id="auth-status"></div>
@@ -85,7 +92,6 @@ HTML_PAGE = """<!DOCTYPE html>
         // Auto-detect Codespaces environment from browser origin
         function resolveServiceUrl(port, fallback) {
             const host = window.location.hostname;
-            // Codespaces URLs: <codespace>-<port>.app.github.dev
             const match = host.match(/^(.+)-\\d+\\.app\\.github\\.dev$/);
             if (match) {
                 return 'https://' + match[1] + '-' + port + '.app.github.dev';
@@ -98,25 +104,20 @@ HTML_PAGE = """<!DOCTYPE html>
         const REALM = "zero-trust-lab";
         const CLIENT_ID = "zt-frontend";
 
-        // Login: redirect to Keycloak authorization endpoint (no PKCE for simplicity)
         function login() {
             const authUrl = KEYCLOAK_URL + '/realms/' + REALM + '/protocol/openid-connect/auth' +
                 '?client_id=' + CLIENT_ID +
                 '&response_type=code' +
                 '&scope=openid profile email' +
                 '&redirect_uri=' + encodeURIComponent(window.location.origin + '/callback');
-
             window.location.href = authUrl;
         }
 
         function logout() {
             sessionStorage.removeItem('access_token');
-            localStorage.removeItem('pkce_verifier');
             document.getElementById('token-info').style.display = 'none';
-            document.getElementById('auth-status').innerHTML =
-                '<div class="status error">Logged out</div>';
+            document.getElementById('auth-status').innerHTML = '';
             document.getElementById('api-result').innerHTML = '';
-            // Redirect to Keycloak logout to end the SSO session
             const logoutUrl = KEYCLOAK_URL + '/realms/' + REALM + '/protocol/openid-connect/logout' +
                 '?client_id=' + CLIENT_ID +
                 '&post_logout_redirect_uri=' + encodeURIComponent(window.location.origin + '/');
@@ -140,61 +141,22 @@ HTML_PAGE = """<!DOCTYPE html>
             }
         }
 
-        // Exchange authorization code for tokens
-        async function exchangeCodeForToken(code) {
-            document.getElementById('auth-status').innerHTML =
-                '<div class="status info">Exchanging authorization code for tokens...</div>';
-
-            const tokenUrl = KEYCLOAK_URL + '/realms/' + REALM + '/protocol/openid-connect/token';
-
-            const body = new URLSearchParams({
-                'grant_type': 'authorization_code',
-                'client_id': CLIENT_ID,
-                'code': code,
-                'redirect_uri': window.location.origin + '/callback'
-            });
-
-            try {
-                const resp = await fetch(tokenUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: body.toString()
-                });
-                const data = await resp.json();
-
-                if (data.access_token) {
-                    sessionStorage.setItem('access_token', data.access_token);
-                    // Decode token payload for display
-                    const payload = JSON.parse(atob(data.access_token.split('.')[1]));
-                    const roles = (payload.realm_access && payload.realm_access.roles) || [];
-                    document.getElementById('auth-status').innerHTML =
-                        '<div class="status success"><strong>Authenticated as ' + payload.preferred_username +
-                        '</strong><br>Roles: ' + roles.join(', ') + '</div>';
-                    document.getElementById('token-info').style.display = 'block';
-                    document.getElementById('token-info').innerHTML =
-                        '<strong>Access Token (JWT):</strong><br><code style="font-size:11px;word-break:break-all;">' +
-                        data.access_token.substring(0, 80) + '...</code><br><br>' +
-                        '<strong>Token Payload:</strong><pre style="font-size:12px;">' +
-                        JSON.stringify(payload, null, 2) + '</pre>';
-                    // Clean up URL
-                    window.history.replaceState({}, document.title, '/');
-                } else {
-                    document.getElementById('auth-status').innerHTML =
-                        '<div class="status error">Token exchange failed: ' + (data.error_description || data.error || 'Unknown error') + '</div>';
-                }
-            } catch(e) {
-                document.getElementById('auth-status').innerHTML =
-                    '<div class="status error">Token exchange failed: ' + e.message + '</div>';
-            }
+        // On page load: check URL hash for token (set by server-side callback)
+        const hashParams = new URLSearchParams(window.location.hash.substring(1));
+        if (hashParams.has('access_token')) {
+            const token = hashParams.get('access_token');
+            sessionStorage.setItem('access_token', token);
+            window.history.replaceState({}, document.title, '/');
         }
 
-        // Check for callback code on page load
+        // Check URL params for error from callback
         const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.has('code')) {
-            exchangeCodeForToken(urlParams.get('code'));
+        if (urlParams.has('auth_error')) {
+            document.getElementById('auth-status').innerHTML =
+                '<div class="status error">Login failed: ' + decodeURIComponent(urlParams.get('auth_error')) + '</div>';
         }
 
-        // Check for stored token
+        // Display current auth state
         if (sessionStorage.getItem('access_token')) {
             try {
                 const payload = JSON.parse(atob(sessionStorage.getItem('access_token').split('.')[1]));
@@ -202,6 +164,12 @@ HTML_PAGE = """<!DOCTYPE html>
                 document.getElementById('auth-status').innerHTML =
                     '<div class="status success"><strong>Authenticated as ' + payload.preferred_username +
                     '</strong><br>Roles: ' + roles.join(', ') + '</div>';
+                document.getElementById('token-info').style.display = 'block';
+                document.getElementById('token-info').innerHTML =
+                    '<strong>Access Token (JWT):</strong><br><code style="font-size:11px;word-break:break-all;">' +
+                    sessionStorage.getItem('access_token').substring(0, 80) + '...</code><br><br>' +
+                    '<strong>Token Payload:</strong><pre style="font-size:12px;">' +
+                    JSON.stringify(payload, null, 2) + '</pre>';
             } catch(e) {
                 document.getElementById('auth-status').innerHTML =
                     '<div class="status success">Authenticated (token in session)</div>';
@@ -214,8 +182,10 @@ HTML_PAGE = """<!DOCTYPE html>
 
 class FrontendHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+
         # Serve passkey demo page
-        if self.path in ("/passkey", "/passkey/"):
+        if parsed.path in ("/passkey", "/passkey/"):
             demo_file = APP_DIR / "passkey_demo.html"
             if demo_file.exists():
                 self.send_response(200)
@@ -228,7 +198,11 @@ class FrontendHandler(BaseHTTPRequestHandler):
                 self.wfile.write(b"passkey_demo.html not found")
             return
 
-        # Callback route serves the same page (JS handles the ?code= param)
+        # OAuth callback: exchange code for token server-side
+        if parsed.path in ("/callback", "/callback/"):
+            self._handle_callback(parsed)
+            return
+
         # Default: serve main frontend page
         page = HTML_PAGE.replace("__KEYCLOAK_URL__", KEYCLOAK_URL)
         page = page.replace("__BACKEND_URL__", BACKEND_URL)
@@ -236,6 +210,65 @@ class FrontendHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
         self.wfile.write(page.encode())
+
+    def _handle_callback(self, parsed):
+        """Exchange authorization code for tokens server-side via Keycloak."""
+        params = urllib.parse.parse_qs(parsed.query)
+        code = params.get("code", [None])[0]
+
+        if not code:
+            self._redirect_with_error("No authorization code received")
+            return
+
+        # Determine the public callback URI (what the browser sees)
+        host_header = self.headers.get("Host", "localhost:3000")
+        if ".app.github.dev" in host_header:
+            scheme = "https"
+        else:
+            scheme = "http"
+        redirect_uri = f"{scheme}://{host_header}/callback"
+
+        # Exchange code for tokens via internal Keycloak URL (Docker network)
+        token_url = f"{KEYCLOAK_INTERNAL_URL}/realms/zero-trust-lab/protocol/openid-connect/token"
+        token_data = urllib.parse.urlencode({
+            "grant_type": "authorization_code",
+            "client_id": "zt-frontend",
+            "code": code,
+            "redirect_uri": redirect_uri,
+        }).encode()
+
+        logger.info("Token exchange: code=%s... redirect_uri=%s", code[:20], redirect_uri)
+
+        try:
+            req = urllib.request.Request(
+                token_url,
+                data=token_data,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                token_response = json.loads(resp.read())
+
+            access_token = token_response.get("access_token")
+            if not access_token:
+                error = token_response.get("error_description", token_response.get("error", "Unknown"))
+                logger.error("Token exchange failed: %s", error)
+                self._redirect_with_error(error)
+                return
+
+            logger.info("Token exchange successful")
+            # Redirect to frontend with token in URL fragment (never sent to server)
+            self.send_response(302)
+            self.send_header("Location", f"/#access_token={urllib.parse.quote(access_token)}")
+            self.end_headers()
+
+        except Exception as exc:
+            logger.error("Token exchange error: %s", exc)
+            self._redirect_with_error(str(exc))
+
+    def _redirect_with_error(self, error):
+        self.send_response(302)
+        self.send_header("Location", f"/?auth_error={urllib.parse.quote(error)}")
+        self.end_headers()
 
     def log_message(self, format, *args):
         logger.info("%s - %s", self.address_string(), format % args)
@@ -245,6 +278,7 @@ if __name__ == "__main__":
     port = 3000
     server = HTTPServer(("0.0.0.0", port), FrontendHandler)
     logger.info("Frontend running on http://localhost:%d", port)
-    logger.info("Keycloak URL: %s", KEYCLOAK_URL)
+    logger.info("Keycloak URL (public): %s", KEYCLOAK_URL)
+    logger.info("Keycloak URL (internal): %s", KEYCLOAK_INTERNAL_URL)
     logger.info("Backend URL: %s", BACKEND_URL)
     server.serve_forever()

@@ -131,6 +131,7 @@ services:
     environment:
       BACKEND_URL: http://172.20.2.30:5000
       KEYCLOAK_URL: http://localhost:8080
+      KEYCLOAK_INTERNAL_URL: http://172.20.1.10:8080
     ports:
       - "3000:3000"
     networks:
