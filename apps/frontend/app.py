@@ -131,10 +131,16 @@ HTML_PAGE = """<!DOCTYPE html>
 
         function logout() {
             sessionStorage.removeItem('access_token');
+            sessionStorage.removeItem('pkce_verifier');
             document.getElementById('token-info').style.display = 'none';
             document.getElementById('auth-status').innerHTML =
                 '<div class="status error">Logged out</div>';
             document.getElementById('api-result').innerHTML = '';
+            // Redirect to Keycloak logout to end the SSO session
+            const logoutUrl = KEYCLOAK_URL + '/realms/' + REALM + '/protocol/openid-connect/logout' +
+                '?client_id=' + CLIENT_ID +
+                '&post_logout_redirect_uri=' + encodeURIComponent(window.location.origin + '/');
+            window.location.href = logoutUrl;
         }
 
         async function callAPI(endpoint) {
@@ -154,17 +160,81 @@ HTML_PAGE = """<!DOCTYPE html>
             }
         }
 
+        // Exchange authorization code for tokens using PKCE
+        async function exchangeCodeForToken(code) {
+            const codeVerifier = sessionStorage.getItem('pkce_verifier');
+            if (!codeVerifier) {
+                document.getElementById('auth-status').innerHTML =
+                    '<div class="status error">PKCE verifier missing. Please login again.</div>';
+                return;
+            }
+
+            document.getElementById('auth-status').innerHTML =
+                '<div class="status info">Exchanging authorization code for tokens...</div>';
+
+            const tokenUrl = KEYCLOAK_URL + '/realms/' + REALM + '/protocol/openid-connect/token';
+
+            const body = new URLSearchParams({
+                'grant_type': 'authorization_code',
+                'client_id': CLIENT_ID,
+                'code': code,
+                'redirect_uri': window.location.origin + '/callback',
+                'code_verifier': codeVerifier
+            });
+
+            try {
+                const resp = await fetch(tokenUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: body.toString()
+                });
+                const data = await resp.json();
+
+                if (data.access_token) {
+                    sessionStorage.setItem('access_token', data.access_token);
+                    sessionStorage.removeItem('pkce_verifier');
+                    // Decode token payload for display
+                    const payload = JSON.parse(atob(data.access_token.split('.')[1]));
+                    const roles = (payload.realm_access && payload.realm_access.roles) || [];
+                    document.getElementById('auth-status').innerHTML =
+                        '<div class="status success"><strong>Authenticated as ' + payload.preferred_username +
+                        '</strong><br>Roles: ' + roles.join(', ') + '</div>';
+                    document.getElementById('token-info').style.display = 'block';
+                    document.getElementById('token-info').innerHTML =
+                        '<strong>Access Token (JWT):</strong><br><code style="font-size:11px;word-break:break-all;">' +
+                        data.access_token.substring(0, 80) + '...</code><br><br>' +
+                        '<strong>Token Payload:</strong><pre style="font-size:12px;">' +
+                        JSON.stringify(payload, null, 2) + '</pre>';
+                    // Clean up URL
+                    window.history.replaceState({}, document.title, '/');
+                } else {
+                    document.getElementById('auth-status').innerHTML =
+                        '<div class="status error">Token exchange failed: ' + (data.error_description || data.error || 'Unknown error') + '</div>';
+                }
+            } catch(e) {
+                document.getElementById('auth-status').innerHTML =
+                    '<div class="status error">Token exchange failed: ' + e.message + '</div>';
+            }
+        }
+
         // Check for callback code on page load
         const urlParams = new URLSearchParams(window.location.search);
         if (urlParams.has('code')) {
-            document.getElementById('auth-status').innerHTML =
-                '<div class="status success">Authorization code received! Exchange for tokens in production flow.</div>';
+            exchangeCodeForToken(urlParams.get('code'));
         }
 
         // Check for stored token
         if (sessionStorage.getItem('access_token')) {
-            document.getElementById('auth-status').innerHTML =
-                '<div class="status success">Authenticated (token in session)</div>';
+            try {
+                const payload = JSON.parse(atob(sessionStorage.getItem('access_token').split('.')[1]));
+                const roles = (payload.realm_access && payload.realm_access.roles) || [];
+                document.getElementById('auth-status').innerHTML =
+                    '<div class="status success"><strong>Authenticated as ' + payload.preferred_username +
+                    '</strong><br>Roles: ' + roles.join(', ') + '</div>';
+            } catch(e) {
+                document.getElementById('auth-status').innerHTML =
+                    '<div class="status success">Authenticated (token in session)</div>';
+            }
         }
     </script>
 </body>
@@ -187,6 +257,7 @@ class FrontendHandler(BaseHTTPRequestHandler):
                 self.wfile.write(b"passkey_demo.html not found")
             return
 
+        # Callback route serves the same page (JS handles the ?code= param)
         # Default: serve main frontend page
         page = HTML_PAGE.replace("__KEYCLOAK_URL__", KEYCLOAK_URL)
         page = page.replace("__BACKEND_URL__", BACKEND_URL)

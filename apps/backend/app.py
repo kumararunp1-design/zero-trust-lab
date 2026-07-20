@@ -21,6 +21,7 @@ from functools import wraps
 import jwt
 import requests
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 
 # ---------------------------------------------------------------------------
 # Logging configuration
@@ -35,6 +36,7 @@ logger = logging.getLogger("zero-trust-backend")
 # Flask application
 # ---------------------------------------------------------------------------
 app = Flask(__name__)
+CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
 
 # ---------------------------------------------------------------------------
 # Environment configuration
