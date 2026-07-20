@@ -115,7 +115,7 @@ HTML_PAGE = """<!DOCTYPE html>
 
         async function login() {
             const codeVerifier = generateCodeVerifier();
-            sessionStorage.setItem('pkce_verifier', codeVerifier);
+            localStorage.setItem('pkce_verifier', codeVerifier);
             const codeChallenge = await generateCodeChallenge(codeVerifier);
 
             const authUrl = KEYCLOAK_URL + '/realms/' + REALM + '/protocol/openid-connect/auth' +
@@ -131,7 +131,7 @@ HTML_PAGE = """<!DOCTYPE html>
 
         function logout() {
             sessionStorage.removeItem('access_token');
-            sessionStorage.removeItem('pkce_verifier');
+            localStorage.removeItem('pkce_verifier');
             document.getElementById('token-info').style.display = 'none';
             document.getElementById('auth-status').innerHTML =
                 '<div class="status error">Logged out</div>';
@@ -162,7 +162,7 @@ HTML_PAGE = """<!DOCTYPE html>
 
         // Exchange authorization code for tokens using PKCE
         async function exchangeCodeForToken(code) {
-            const codeVerifier = sessionStorage.getItem('pkce_verifier');
+            const codeVerifier = localStorage.getItem('pkce_verifier');
             if (!codeVerifier) {
                 document.getElementById('auth-status').innerHTML =
                     '<div class="status error">PKCE verifier missing. Please login again.</div>';
@@ -192,7 +192,7 @@ HTML_PAGE = """<!DOCTYPE html>
 
                 if (data.access_token) {
                     sessionStorage.setItem('access_token', data.access_token);
-                    sessionStorage.removeItem('pkce_verifier');
+                    localStorage.removeItem('pkce_verifier');
                     // Decode token payload for display
                     const payload = JSON.parse(atob(data.access_token.split('.')[1]));
                     const roles = (payload.realm_access && payload.realm_access.roles) || [];
