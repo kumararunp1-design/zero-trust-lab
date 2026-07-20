@@ -98,39 +98,13 @@ HTML_PAGE = """<!DOCTYPE html>
         const REALM = "zero-trust-lab";
         const CLIENT_ID = "zt-frontend";
 
-        // PKCE helpers
-        function base64urlEncode(buffer) {
-            const bytes = new Uint8Array(buffer);
-            let str = '';
-            for (const b of bytes) str += String.fromCharCode(b);
-            return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-        }
-
-        function generateCodeVerifier() {
-            const array = new Uint8Array(32);
-            crypto.getRandomValues(array);
-            return base64urlEncode(array);
-        }
-
-        async function generateCodeChallenge(verifier) {
-            const encoder = new TextEncoder();
-            const data = encoder.encode(verifier);
-            const hash = await crypto.subtle.digest('SHA-256', data);
-            return base64urlEncode(hash);
-        }
-
-        async function login() {
-            const codeVerifier = generateCodeVerifier();
-            localStorage.setItem('pkce_verifier', codeVerifier);
-            const codeChallenge = await generateCodeChallenge(codeVerifier);
-
+        // Login: redirect to Keycloak authorization endpoint (no PKCE for simplicity)
+        function login() {
             const authUrl = KEYCLOAK_URL + '/realms/' + REALM + '/protocol/openid-connect/auth' +
                 '?client_id=' + CLIENT_ID +
                 '&response_type=code' +
                 '&scope=openid profile email' +
-                '&redirect_uri=' + encodeURIComponent(window.location.origin + '/callback') +
-                '&code_challenge=' + codeChallenge +
-                '&code_challenge_method=S256';
+                '&redirect_uri=' + encodeURIComponent(window.location.origin + '/callback');
 
             window.location.href = authUrl;
         }
@@ -166,15 +140,8 @@ HTML_PAGE = """<!DOCTYPE html>
             }
         }
 
-        // Exchange authorization code for tokens using PKCE
+        // Exchange authorization code for tokens
         async function exchangeCodeForToken(code) {
-            const codeVerifier = localStorage.getItem('pkce_verifier');
-            if (!codeVerifier) {
-                document.getElementById('auth-status').innerHTML =
-                    '<div class="status error">PKCE verifier missing. Please login again.</div>';
-                return;
-            }
-
             document.getElementById('auth-status').innerHTML =
                 '<div class="status info">Exchanging authorization code for tokens...</div>';
 
@@ -184,8 +151,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 'grant_type': 'authorization_code',
                 'client_id': CLIENT_ID,
                 'code': code,
-                'redirect_uri': window.location.origin + '/callback',
-                'code_verifier': codeVerifier
+                'redirect_uri': window.location.origin + '/callback'
             });
 
             try {
@@ -198,7 +164,6 @@ HTML_PAGE = """<!DOCTYPE html>
 
                 if (data.access_token) {
                     sessionStorage.setItem('access_token', data.access_token);
-                    localStorage.removeItem('pkce_verifier');
                     // Decode token payload for display
                     const payload = JSON.parse(atob(data.access_token.split('.')[1]));
                     const roles = (payload.realm_access && payload.realm_access.roles) || [];

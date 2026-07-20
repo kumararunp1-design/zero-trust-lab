@@ -116,7 +116,7 @@
       "redirectUris": ["http://localhost:3000/*", "https://*.app.github.dev/*"],
       "webOrigins": ["http://localhost:3000", "https://*.app.github.dev"],
       "attributes": {
-        "pkce.code.challenge.method": "S256",
+        "pkce.code.challenge.method": "",
         "post.logout.redirect.uris": "http://localhost:3000/*##https://*.app.github.dev/*"
       },
       "defaultClientScopes": [
