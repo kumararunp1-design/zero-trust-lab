@@ -82,8 +82,19 @@ HTML_PAGE = """<!DOCTYPE html>
     </div>
 
     <script>
-        const KEYCLOAK_URL = "__KEYCLOAK_URL__";
-        const BACKEND_URL  = "__BACKEND_URL__";
+        // Auto-detect Codespaces environment from browser origin
+        function resolveServiceUrl(port, fallback) {
+            const host = window.location.hostname;
+            // Codespaces URLs: <codespace>-<port>.app.github.dev
+            const match = host.match(/^(.+)-\\d+\\.app\\.github\\.dev$/);
+            if (match) {
+                return 'https://' + match[1] + '-' + port + '.app.github.dev';
+            }
+            return fallback;
+        }
+
+        const KEYCLOAK_URL = resolveServiceUrl(8080, "__KEYCLOAK_URL__");
+        const BACKEND_URL  = resolveServiceUrl(5000, "__BACKEND_URL__");
         const REALM = "zero-trust-lab";
         const CLIENT_ID = "zt-frontend";
 
