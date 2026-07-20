@@ -97,9 +97,13 @@ time_check_passed if {
 # Deny reasons (for audit logging)
 # ============================================================
 deny_reasons[reason] if {
-    not some role in input.user.roles
-    _ := role_permissions[role]
+    not has_valid_role
     reason := "No valid role found for user"
+}
+
+has_valid_role if {
+    some role in input.user.roles
+    _ := role_permissions[role]
 }
 
 deny_reasons[reason] if {
