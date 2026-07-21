@@ -93,8 +93,7 @@ def validate_token(token):
         token,
         public_key,
         algorithms=["RS256"],
-        audience="account",
-        options={"verify_exp": True},
+        options={"verify_exp": True, "verify_aud": False},
     )
     logger.info(
         "Token validated for user: %s",

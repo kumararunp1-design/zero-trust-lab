@@ -29,7 +29,7 @@ role_permissions := {
         "sensitivity_levels": ["public", "internal", "confidential", "secret"]
     },
     "analyst": {
-        "resources": ["alerts", "logs", "reports", "dashboards"],
+        "resources": ["alerts", "logs", "reports", "dashboards", "data"],
         "actions": ["read"],
         "sensitivity_levels": ["public", "internal", "confidential"]
     },
